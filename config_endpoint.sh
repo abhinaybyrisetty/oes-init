@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 if [ $# -gt 1 ]
 then
@@ -11,7 +11,7 @@ COMPONENT=$1
 case "$COMPONENT" in
 
   oes-ui)
-    cp /config/app-config.json /var/www/html/assets/config/app-config.json
+    cp /config/* /var/www/html/assets/config/
     sleep $EXTERNAL_IP_CHECK_DELAY
     ## If loadbalancer is available on the target, below instruction will fetch external IP of oes-gate
     ENDPOINT_IP=$(kubectl get svc oes-gate-svc -o jsonpath="{.status.loadBalancer.ingress[].ip}")
@@ -29,7 +29,7 @@ case "$COMPONENT" in
     fi
     ;;
   oes-gate)
-    cp /config/gate.yml /opt/spinnaker/config/gate.yml
+    cp /config/* /opt/spinnaker/config/
     sleep $EXTERNAL_IP_CHECK_DELAY
     ## If loadbalancer is available on the target, below instruction will fetch external IP of oes-ui
     ENDPOINT_IP=$(kubectl get svc oes-ui-svc -o jsonpath="{.status.loadBalancer.ingress[].ip}")
@@ -45,7 +45,29 @@ case "$COMPONENT" in
     fi
     ;;
   sapor)
-    echo "Entered SAPOR"
+    cp /config/* /opt/opsmx/
+    sleep $EXTERNAL_IP_CHECK_DELAY
+    ## If loadbalancer is available on the target, below instruction will fetch external IP of oes-ui
+    ENDPOINT_IP=$(kubectl get svc spin-deck -o jsonpath="{.status.loadBalancer.ingress[].ip}")
+    PORT=9000
+
+    ## If spin-deck load balancer is separate
+    if [ -z "$ENDPOINT_IP" ]; then
+      ENDPOINT_IP=$(kubectl get svc spin-deck-ui -o jsonpath="{.status.loadBalancer.ingress[].ip}")
+      PORT=9000
+    fi
+
+    ## If external IP is not available
+    if [ -z "$ENDPOINT_IP" ]; then
+      ## Fetch the IP of the host and replace in spinnaker.yaml
+      ENDPOINT_IP=$(kubectl get ep kubernetes -n default -o jsonpath="{.subsets[].addresses[].ip}")
+      PORT=$(kubectl get svc spin-gate -o jsonpath="{.spec.ports[].nodePort}")
+      sed -i "s/SPIN_GATE_LOADBALANCER_IP_PORT/$ENDPOINT_IP:$PORT/g" /opt/opsmx/spinnaker.yaml
+      #sed -i "s/spin-gate:8084/$ENDPOINT_IP:$PORT/g" /opt/opsmx/spinnaker.yaml
+    else
+      ## Substitute oes-ui external IP in spinnaker.yaml
+      sed -i "s/SPIN_GATE_LOADBALANCER_IP_PORT/$ENDPOINT_IP:$PORT/g" /opt/opsmx/spinnaker.yaml
+    fi
     ;;
   *)
     echo "Invalid input"
