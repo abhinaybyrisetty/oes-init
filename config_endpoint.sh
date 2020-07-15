@@ -8,13 +8,74 @@ fi
 
 COMPONENT=$1
 
+check_for_loadBalancer()
+{
+    ## Wait for $EXTERNAL_IP_CHECK_DELAY till K8s assins a load Balancer IP to oes-gate
+    iter=0
+    lapsedTime=0
+    while [ $iter -lt 36 ]
+    do
+      ENDPOINT_IP=$(kubectl get svc $1 -o jsonpath="{.status.loadBalancer.ingress[].ip}")
+      if [ ! -z "$ENDPOINT_IP" ];
+      then
+        echo "Found LoadBalancer IP for" $1
+        break
+      fi
+      sleep 5
+      lapsedTime=`expr $lapsedTime + 5`
+      if [ $lapsedTime -eq $EXTERNAL_IP_CHECK_DELAY ];
+      then
+	echo "Time Lapsed" $lapsedTime
+        echo "Timeout! Fetching nodeport IP alternatively"
+        break
+      fi
+      echo "Time Lapsed" $lapsedTime
+      iter=`expr $iter + 1`
+    done
+}
+
+check_for_spinnakerGate_loadBalancer()
+{
+    ## Wait for $EXTERNAL_IP_CHECK_DELAY till K8s assins a load Balancer IP to oes-gate
+    iter=0
+    lapsedTime=0
+    while [ $iter -lt 36 ]
+    do
+      # Check if loadBalancer is directly assinged to spin-deck or spin-deck-ui service
+      ENDPOINT_IP=$(kubectl get svc spin-deck -o jsonpath="{.status.loadBalancer.ingress[].ip}")
+
+      if [ -z "$ENDPOINT_IP" ];
+      then
+        ENDPOINT_IP=$(kubectl get svc spin-deck-ui -o jsonpath="{.status.loadBalancer.ingress[].ip}")
+      fi
+
+      if [ ! -z "$ENDPOINT_IP" ];
+      then
+        echo "Found LoadBalancer IP for" $1
+        break
+      fi
+      sleep 5
+      lapsedTime=`expr $lapsedTime + 5`
+      if [ $lapsedTime -eq $2 ];
+      then
+        echo "Time Lapsed" $lapsedTime
+        echo "Timeout! Fetching nodeport IP alternatively"
+        break
+      fi
+      echo "Time Lapsed" $lapsedTime
+      iter=`expr $iter + 1`
+    done
+}
+
 case "$COMPONENT" in
 
   oes-ui)
     cp /config/* /var/www/html/assets/config/
-    sleep $EXTERNAL_IP_CHECK_DELAY
-    ## If loadbalancer is available on the target, below instruction will fetch external IP of oes-gate
-    ENDPOINT_IP=$(kubectl get svc oes-gate-svc -o jsonpath="{.status.loadBalancer.ingress[].ip}")
+
+    ENDPOINT_IP=""
+
+    ## Wait for $EXTERNAL_IP_CHECK_DELAY till K8s assins a load Balancer IP to oes-gate
+    check_for_loadBalancer oes-gate
 
     ## If external IP is not available
     if [ -z "$ENDPOINT_IP" ]; then
@@ -30,9 +91,11 @@ case "$COMPONENT" in
     ;;
   oes-gate)
     cp /config/* /opt/spinnaker/config/
-    sleep $EXTERNAL_IP_CHECK_DELAY
-    ## If loadbalancer is available on the target, below instruction will fetch external IP of oes-ui
-    ENDPOINT_IP=$(kubectl get svc oes-ui-svc -o jsonpath="{.status.loadBalancer.ingress[].ip}")
+
+    ENDPOINT_IP=""
+
+    ## Wait for $EXTERNAL_IP_CHECK_DELAY till K8s assins a load Balancer IP to oes-gate
+    check_for_loadBalancer oes-ui
 
     ## If external IP is not available
     if [ -z "$ENDPOINT_IP" ]; then
@@ -46,16 +109,12 @@ case "$COMPONENT" in
     ;;
   sapor)
     cp /config/* /opt/opsmx/
-    sleep $EXTERNAL_IP_CHECK_DELAY
-    ## If loadbalancer is available on the target, below instruction will fetch external IP of oes-ui
-    ENDPOINT_IP=$(kubectl get svc spin-deck -o jsonpath="{.status.loadBalancer.ingress[].ip}")
-    PORT=9000
 
-    ## If spin-deck load balancer is separate
-    if [ -z "$ENDPOINT_IP" ]; then
-      ENDPOINT_IP=$(kubectl get svc spin-deck-ui -o jsonpath="{.status.loadBalancer.ingress[].ip}")
-      PORT=9000
-    fi
+    ENDPOINT_IP=""
+
+    ## Wait for $EXTERNAL_IP_CHECK_DELAY till K8s assins a load Balancer IP to oes-gate
+    check_for_spinnakerGate_loadBalancer spin-deck $SPINNAKER_SETUP_DELAY
+    PORT=9000
 
     ## If external IP is not available
     if [ -z "$ENDPOINT_IP" ]; then
